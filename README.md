@@ -1,2 +1,2 @@
-# astrbot_plugin_kindroid_qq_One
-Kindroid接入qq插件/一个qq对应一个Bot
+# kindroid_qq_One
+一个适用于AstrBot的kindroid插件，一个qq绑定一个Kindroid

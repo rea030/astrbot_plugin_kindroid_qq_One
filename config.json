@@ -1,0 +1,7 @@
+{
+  "api_key": "kn_f6081618-ef63-4411-92ec-32dfc2d80a35",
+  "ai_id": "qOjdPFmjbE1hqpoNh66g",  // 固定 AI ID
+  "shared_code": "TD86M",         // 或使用 SHARED_AI_CODE
+  "api_endpoint": "https://api.kindroid.ai/v1/send-message"
+  "session_timeout": 600  # 会话超时时间（秒）
+}
