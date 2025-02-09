@@ -1,0 +1,11 @@
+# Kindroid API配置
+api_key: "你的API密钥"  # 替换为你的 Kindroid API 密钥
+api_endpoint: "https://api.kindroid.ai/v1/chat"  # Kindroid API地址
+ai_id: "你的AI_ID"  # 替换为你的 AI ID
+
+# 会话配置
+session_timeout: 3600  # 会话超时时间(秒)
+
+# 回复配置
+default_greeting: "通讯系统已同步，用户身份校验完成，已准备就绪，交流界面全面开放，可以发送消息了。"  # 默认问候语
+error_message: "抱歉，发生了一些错误，请稍后再试"  # 错误提示语
