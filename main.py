@@ -19,7 +19,7 @@ class Plugin(BasePlugin):
         
     def load_config(self) -> dict:
         """加载配置文件"""
-        config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.yaml")
+        config_path = os.path.join(os.path.dirname(__file__), "config.yaml")
         try:
             with open(config_path, 'r', encoding='utf-8') as f:
                 return yaml.safe_load(f)
