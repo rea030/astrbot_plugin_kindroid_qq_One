@@ -8,8 +8,6 @@ import os
 from typing import Dict, Any
 
 class Plugin(BasePlugin):
-    """Kindroid QQ聊天插件"""
-    
     def __init__(self):
         super().__init__()
         self.sessions: Dict[str, Dict[str, Any]] = {}
@@ -18,7 +16,6 @@ class Plugin(BasePlugin):
         self.is_configured = self.check_configuration()
         
     def load_config(self) -> dict:
-        """加载配置文件"""
         config_path = os.path.join(os.path.dirname(__file__), "config.yaml")
         try:
             with open(config_path, 'r', encoding='utf-8') as f:
@@ -30,17 +27,15 @@ class Plugin(BasePlugin):
                 "api_endpoint": "https://api.kindroid.ai/v1/chat",
                 "ai_id": "",
                 "session_timeout": 3600,
-                "default_greeting": "通讯开通,可以发送消息了",
+                "default_greeting": "你好,我是你的AI助手",
                 "error_message": "抱歉,发生了一些错误,请稍后再试"
             }
 
     def check_configuration(self) -> bool:
-        """检查必要配置是否已设置"""
         return bool(self.config.get("api_key")) and bool(self.config.get("ai_id"))
         
     def save_config(self):
-        """保存配置到文件"""
-        config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.yaml")
+        config_path = os.path.join(os.path.dirname(__file__), "config.yaml")
         try:
             with open(config_path, 'w', encoding='utf-8') as f:
                 yaml.safe_dump(self.config, f)
@@ -50,7 +45,6 @@ class Plugin(BasePlugin):
             return False
 
     async def handle_message(self, event: MessageEvent):
-        """处理消息事件"""
         if not self.is_configured:
             await self.handle_configuration(event)
             return
@@ -72,7 +66,6 @@ class Plugin(BasePlugin):
             await event.reply(self.config["error_message"])
 
     async def handle_configuration(self, event: MessageEvent):
-        """配置处理流程"""
         message = event.message.strip()
         
         if not self.config.get("api_key"):
@@ -97,7 +90,6 @@ class Plugin(BasePlugin):
             return
 
     async def send_to_kindroid(self, message: str, session_id: str = "") -> dict:
-        """发送请求到Kindroid API"""
         headers = {
             "Authorization": f"Bearer {self.config['api_key']}",
             "Content-Type": "application/json"
@@ -127,47 +119,34 @@ class Plugin(BasePlugin):
             self.logger.error(f"发送请求到Kindroid失败: {e}")
             return {"response": self.config["error_message"]}
 
-    async def chat_break(self, api_key: str, ai_id: str, greeting: str) -> dict:
-        """重置对话"""
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
-        data = {
-            "ai_id": ai_id,
-            "greeting": greeting
-        }
-        
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{self.config['api_endpoint']}/chat-break",
-                    headers=headers,
-                    json=data
-                ) as resp:
-                    if resp.status == 200:
-                        return await resp.json()
-                    else:
-                        return {"response": self.config["error_message"]}
-        except Exception as e:
-            self.logger.error(f"Chat-break请求失败: {e}")
-            return {"response": self.config["error_message"]}
-
     async def reset_session(self, user_id: str, greeting: str = None):
-        """重置会话"""
         if user_id in self.sessions:
             del self.sessions[user_id]
             
         if greeting:
-            return await self.chat_break(
-                self.config["api_key"],
-                self.config["ai_id"],
-                greeting
-            )
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        f"{self.config['api_endpoint']}/chat-break",
+                        headers={
+                            "Authorization": f"Bearer {self.config['api_key']}",
+                            "Content-Type": "application/json"
+                        },
+                        json={
+                            "ai_id": self.config["ai_id"],
+                            "greeting": greeting
+                        }
+                    ) as resp:
+                        if resp.status == 200:
+                            return await resp.json()
+                        else:
+                            return {"response": self.config["error_message"]}
+            except Exception as e:
+                self.logger.error(f"Chat-break请求失败: {e}")
+                return {"response": self.config["error_message"]}
         return {"response": "会话已重置"}
 
     async def on_command(self, event: MessageEvent, command: str, args: str):
-        """命令处理"""
         if command == "reset":
             greeting = args.strip() if args else self.config.get("default_greeting", "你好")
             response = await self.reset_session(event.user_id, greeting)
@@ -184,3 +163,5 @@ class Plugin(BasePlugin):
                 "  ai_id:你的AI_ID - 设置AI ID"
             )
             await event.reply(help_text)
+
+plugin = Plugin()
