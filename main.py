@@ -1,98 +1,143 @@
-from astrbot import Plugin
-from astrbot.adapters.qq import MessageEvent
-import requests
-import json
+from astrbot.core.plugin import BasePlugin
+from astrbot.types import MessageEvent
+import aiohttp
+import yaml
 import time
-from celery import Celery
-from celery.schedules import crontab
+import logging
+import os
+import asyncio
+from typing import Dict, Any
+import json
 
-plugin = Plugin("Kindroid QQ")
-sessions = {}  # 存储用户对话上下文 {user_id: {"last_active": timestamp, "session_id": "xxx"}}
+class Plugin(BasePlugin):
+    def __init__(self):
+        super().__init__()
+        self.sessions: Dict[str, Dict[str, Any]] = {}
+        self.config = self.load_config()
+        self.logger = logging.getLogger(__name__)
+        self.is_configured = self.check_configuration()
+        
+    def check_configuration(self) -> bool:
+        """检查必要配置是否已设置"""
+        return bool(self.config.get("api_key")) and bool(self.config.get("ai_id"))
+        
+    def save_config(self):
+        """保存配置到文件"""
+        config_path = os.path.join(os.path.dirname(__file__), "config.yml")
+        try:
+            with open(config_path, 'w', encoding='utf-8') as f:
+                yaml.safe_dump(self.config, f)
+            return True
+        except Exception as e:
+            self.logger.error(f"保存配置失败: {e}")
+            return False
 
-# 初始化 Celery
-celery = Celery('tasks', broker='redis://localhost')
+    async def handle_message(self, event: MessageEvent):
+        """处理接收到的消息"""
+        user_id = event.user_id
+        message = event.message.strip()
+        
+        # 如果配置未完成，进入配置流程
+        if not self.is_configured:
+            await self.handle_configuration(event)
+            return
+            
+        # 正常消息处理逻辑
+        try:
+            response = await self.send_to_kindroid(
+                message,
+                session_id=self.sessions.get(user_id, {}).get("session_id", "")
+            )
+            await event.reply(response.get("response", self.config["error_message"]))
+        except Exception as e:
+            self.logger.error(f"处理消息时发生错误: {e}")
+            await event.reply(self.config["error_message"])
 
-# 异步调用 Kindroid API
-@celery.task
-def async_kindroid_call(api_key: str, message: str, session_id: str = "") -> dict:
-    headers = {"Authorization": f"Bearer {api_key}"}
-    data = {
-        "message": message,
-        "ai_id": plugin.config["ai_id"],  # 指定目标 AI ID
-        "session_id": session_id  # 用于维持上下文
-    }
-    try:
-        resp = requests.post(plugin.config["api_endpoint"], headers=headers, json=data)
-        return resp.json()
-    except Exception as e:
-        return {"response": f"请求失败: {str(e)}"}
+    async def handle_configuration(self, event: MessageEvent):
+        """处理配置流程"""
+        message = event.message.strip()
+        
+        if not self.config.get("api_key"):
+            if message.startswith("api_key:"):
+                api_key = message.replace("api_key:", "").strip()
+                self.config["api_key"] = api_key
+                self.save_config()
+                await event.reply("API Key 已保存，请输入 AI ID (格式: ai_id:你的AI_ID)")
+            else:
+                await event.reply("请输入你的 API Key (格式: api_key:你的API密钥)")
+            return
+            
+        if not self.config.get("ai_id"):
+            if message.startswith("ai_id:"):
+                ai_id = message.replace("ai_id:", "").strip()
+                self.config["ai_id"] = ai_id
+                self.save_config()
+                self.is_configured = True
+                await event.reply("配置完成！现在可以开始使用了。发送 /help 查看使用帮助。")
+            else:
+                await event.reply("请输入你的 AI ID (格式: ai_id:你的AI_ID)")
+            return
 
-# 处理 QQ 消息
-@plugin.on_message("qq")
-async def handle_qq_message(event: MessageEvent):
-    user_id = event.user_id
-    message = event.message.strip()
+    async def chat_break(self, api_key: str, ai_id: str, greeting: str) -> dict:
+        """调用 chat-break 接口"""
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        data = {
+            "ai_id": ai_id,
+            "greeting": greeting
+        }
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{self.config['api_endpoint']}/chat-break",
+                    headers=headers,
+                    json=data
+                ) as resp:
+                    if resp.status == 200:
+                        return await resp.json()
+                    else:
+                        self.logger.error(f"Chat-break请求失败: HTTP {resp.status}")
+                        return {"response": self.config["error_message"]}
+        except Exception as e:
+            self.logger.error(f"Chat-break请求失败: {e}")
+            return {"response": self.config["error_message"]}
 
-    # 检查会话是否超时
-    if user_id in sessions and (time.time() - sessions[user_id]["last_active"]) > plugin.config["session_timeout"]:
-        await reset_session(user_id)
+    async def reset_session(self, user_id: str, greeting: str = None):
+        """重置用户会话并可选择性地发送问候语"""
+        if user_id in self.sessions:
+            del self.sessions[user_id]
+            self.logger.info(f"已重置用户 {user_id} 的会话")
+            
+        if greeting:
+            response = await self.chat_break(
+                self.config["api_key"],
+                self.config["ai_id"],
+                greeting
+            )
+            return response
+        return {"response": "会话已重置"}
 
-    # 异步调用 Kindroid API
-    task = async_kindroid_call.delay(plugin.config["api_key"], message, session_id=sessions.get(user_id, {}).get("session_id", ""))
-    result = task.get(timeout=30)  # 设置超时时间
-    await event.reply(result["response"])
+    async def on_command(self, event: MessageEvent, command: str, args: str):
+        """处理命令"""
+        if command == "reset":
+            greeting = args.strip() if args else self.config.get("default_greeting", "你好")
+            response = await self.reset_session(event.user_id, greeting)
+            await event.reply(response["response"])
+            
+        elif command == "help":
+            help_text = (
+                "Kindroid QQ 插件使用帮助:\n"
+                "- 直接发送消息即可与AI对话\n"
+                "- /reset [问候语]: 重置当前会话，可选择性地设置问候语\n"
+                "- /help: 显示本帮助信息\n"
+                "- 配置命令:\n"
+                "  api_key:你的API密钥 - 设置API Key\n"
+                "  ai_id:你的AI_ID - 设置AI ID"
+            )
+            await event.reply(help_text)
 
-# 发送消息给 Kindroid
-def send_to_kindroid(api_key: str, message: str) -> dict:
-    headers = {"Authorization": f"Bearer {api_key}"}
-    data = {
-        "message": message,
-        "ai_id": plugin.config["ai_id"],  # 指定目标 AI ID
-        # 或使用 shared_code: "shared_code": plugin.config["shared_code"]
-    }
-    resp = requests.post(plugin.config["api_endpoint"], headers=headers, json=data)
-    return resp.json()
-
-# 同步重置会话
-def reset_session(user_id: str):
-    if user_id in sessions:
-        del sessions[user_id]
-
-# Celery 配置：每小时重置会话
-celery.conf.beat_schedule = {
-    'reset-sessions-every-hour': {
-        'task': 'kindroid_qq.reset_sessions',
-        'schedule': crontab(hour='*/1'),  # 每小时重置一次会话
-    },
-}
-
-# 同步调用重置会话
-@celery.task
-def reset_sessions():
-    for user_id in list(sessions.keys()):
-        reset_session(user_id)
-
-# 新增 chat break 功能
-@plugin.on_command("chat_break")
-async def handle_chat_break_command(event: MessageEvent, args: str):
-    user_id = event.user_id
-    greeting = args.strip() if args else "Hello"  # 默认问候语
-
-    # 调用 Kindroid 的 chat-break 接口
-    response = await chat_break(plugin.config["api_key"], plugin.config["ai_id"], greeting)
-
-    # 发送响应到 QQ
-    await event.reply(response["response"])
-
-# 发送请求给 Kindroid 的 chat-break 接口
-async def chat_break(api_key: str, ai_id: str, greeting: str) -> dict:
-    headers = {"Authorization": f"Bearer {api_key}"}
-    data = {
-        "ai_id": ai_id,
-        "greeting": greeting
-    }
-    try:
-        resp = requests.post(plugin.config["api_endpoint"] + "/chat-break", headers=headers, json=data)
-        return resp.json()
-    except Exception as e:
-        return {"response": f"请求失败: {str(e)}"}
+# 创建插件实例
+plugin = Plugin()
