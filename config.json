@@ -1,7 +1,0 @@
-{
-  "api_key": "your_kindroid_api_key",
-  "ai_id": "kindroid_ai_123456",  // 固定 AI ID
-  "shared_code": "ABCDE",         // 或使用 SHARED_AI_CODE
-  "api_endpoint": "https://api.kindroid.ai/v1/send-message"
-  "session_timeout": 600  # 会话超时时间（秒）
-}
