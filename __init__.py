@@ -1,3 +1,3 @@
-from .src.plugin import Plugin
+from .plugin import Plugin
 
 plugin = Plugin()
