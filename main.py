@@ -164,4 +164,5 @@ class Plugin(BasePlugin):
             )
             await event.reply(help_text)
 
+# 创建插件实例
 plugin = Plugin()
